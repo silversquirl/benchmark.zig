@@ -43,3 +43,9 @@ pub const main = benchmark.main(.{}, struct {
 ```
 
 Running this with `zig run -OReleaseFast example.zig` produces output similar to the following:
+
+```
+BENCHMARK                      ITERATIONS    TIME
+arrayListWriter                  36171528    27ns/op (1s total)
+allocPrint                       48251012    20ns/op (1s total)
+```

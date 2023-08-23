@@ -9,22 +9,21 @@ pub fn main(comptime options: Options, comptime benchmarks: type) fn () std.fs.F
     return struct {
         fn actualMain() !void {
             const stderr = std.io.getStdErr();
-            const config = std.debug.detectTTYConfig(stderr);
+            const config = std.io.tty.detectConfig(stderr);
             const w = stderr.writer();
 
             if (@import("builtin").mode == .Debug) {
-                try config.setColor(w, .Red);
-                try config.setColor(w, .Bold);
+                try config.setColor(w, .red);
+                try config.setColor(w, .bold);
                 try w.print("WARNING: Running benchmarks in debug mode!\n", .{});
-                try config.setColor(w, .Reset);
+                try config.setColor(w, .reset);
             }
 
-            try config.setColor(w, .Bold);
+            try config.setColor(w, .bold);
             try w.print("{s:<30} {s:>10}    {s}\n", .{ "BENCHMARK", "ITERATIONS", "TIME" });
-            try config.setColor(w, .Reset);
+            try config.setColor(w, .reset);
 
             inline for (comptime std.meta.declarations(benchmarks)) |decl| {
-                if (!decl.is_pub) continue;
                 try w.print("{s:<30}", .{decl.name});
                 if (runBench(@field(benchmarks, decl.name), options)) |res| {
                     try w.print(" {:>10}    {}/op ({} total)\n", .{
@@ -34,13 +33,13 @@ pub fn main(comptime options: Options, comptime benchmarks: type) fn () std.fs.F
                     });
                 } else |err| {
                     if (err == error.BenchmarkCanceled) {
-                        try config.setColor(w, .Cyan);
+                        try config.setColor(w, .cyan);
                         try w.writeAll(" CANCELED\n");
-                        try config.setColor(w, .Reset);
+                        try config.setColor(w, .reset);
                     } else {
-                        try config.setColor(w, .Red);
+                        try config.setColor(w, .red);
                         try w.print(" FAILED: {s}\n", .{@errorName(err)});
-                        try config.setColor(w, .Reset);
+                        try config.setColor(w, .reset);
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }

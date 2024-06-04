@@ -1,7 +1,7 @@
 const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const benchmark = b.addModule("benchmark", .{
-        .root_source_file = .{ .path = "benchmark.zig" },
+        .root_source_file = b.path("benchmark.zig"),
     });
 
     try b.modules.put(b.dupe("benchmark"), benchmark);

@@ -42,7 +42,7 @@ pub const main = benchmark.main(.{}, struct {
 });
 ```
 
-Running this with `zig run -OReleaseFast example.zig` produces output similar to the following:
+Running this with `zig build run -Doptimize=ReleaseFast` produces output similar to the following:
 
 ```
 BENCHMARK                      ITERATIONS    TIME

@@ -19,8 +19,4 @@ pub fn build(b: *std.Build) !void {
 
     const example_run = b.addRunArtifact(example_exe);
     example_run_step.dependOn(&example_run.step);
-
-    // install the artifact - depending on the example exe
-    // const example_build_step = b.addInstallArtifact(example_exe, .{});
-    // example_step.dependOn(&example_build_step.step);
 }

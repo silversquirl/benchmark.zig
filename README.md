@@ -4,13 +4,13 @@ This is a tiny microbenchmark library for Zig, designed to be easy to use and ve
 
 ## Usage
 
-You can either manually copy `benchmark.zig` into your project, or add it as a dependency using the Zig package manager.
+You can either manually copy `benchmark.zig` into your project and reference it with `@import("benchmark.zig")`, or add it as a dependency using the Zig package manager and reference as below.
 
 A basic usage example is shown below:
 
 ```zig
 const std = @import("std");
-const benchmark = @import("benchmark.zig");
+const benchmark = @import("benchmark");
 pub const main = benchmark.main(.{}, struct {
     // Benchmarks are just public functions
     pub fn arrayListWriter(b: *benchmark.B) !void {
@@ -42,7 +42,7 @@ pub const main = benchmark.main(.{}, struct {
 });
 ```
 
-Running this with `zig run -OReleaseFast example.zig` produces output similar to the following:
+Running this with `zig build run -Doptimize=ReleaseFast` produces output similar to the following:
 
 ```
 BENCHMARK                      ITERATIONS    TIME

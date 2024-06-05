@@ -1,5 +1,5 @@
 const std = @import("std");
-const benchmark = @import("benchmark.zig");
+const benchmark = @import("benchmark");
 pub const main = benchmark.main(.{}, struct {
     // Benchmarks are just public functions
     pub fn arrayListWriter(b: *benchmark.B) !void {

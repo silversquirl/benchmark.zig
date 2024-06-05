@@ -4,13 +4,13 @@ This is a tiny microbenchmark library for Zig, designed to be easy to use and ve
 
 ## Usage
 
-You can either manually copy `benchmark.zig` into your project, or add it as a dependency using the Zig package manager.
+You can either manually copy `benchmark` into your project, or add it as a dependency using the Zig package manager.
 
 A basic usage example is shown below:
 
 ```zig
 const std = @import("std");
-const benchmark = @import("benchmark.zig");
+const benchmark = @import("benchmark");
 pub const main = benchmark.main(.{}, struct {
     // Benchmarks are just public functions
     pub fn arrayListWriter(b: *benchmark.B) !void {

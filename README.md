@@ -4,7 +4,7 @@ This is a tiny microbenchmark library for Zig, designed to be easy to use and ve
 
 ## Usage
 
-You can either manually copy `benchmark` into your project, or add it as a dependency using the Zig package manager.
+You can either manually copy `benchmark.zig` into your project and reference it with `@import("benchmark.zig")`, or add it as a dependency using the Zig package manager and reference as below.
 
 A basic usage example is shown below:
 

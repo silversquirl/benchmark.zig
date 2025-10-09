@@ -1,19 +1,26 @@
 const std = @import("std");
 pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
     const benchmark = b.addModule("benchmark", .{
         .root_source_file = b.path("benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     try b.modules.put(b.dupe("benchmark"), benchmark);
 
     // example exe and run
-    var example_exe = b.addExecutable(.{
+    const example_exe = b.addExecutable(.{
         .name = "example",
-        .root_source_file = b.path("example.zig"),
-        .target = b.standardTargetOptions(.{}),
-        .optimize = b.standardOptimizeOption(.{}),
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("example.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "benchmark", .module = benchmark }},
+        }),
     });
-    example_exe.root_module.addImport("benchmark", benchmark);
 
     const example_run_step = b.step("run", "run the example");
 

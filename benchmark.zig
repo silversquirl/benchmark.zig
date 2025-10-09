@@ -5,12 +5,15 @@ pub const Options = struct {
     limit: u64 = std.time.ns_per_s, // Maximum number of benchmark executions
 };
 
-pub fn main(comptime options: Options, comptime benchmarks: type) fn () std.fs.File.WriteError!void {
+const MainError = std.Io.Writer.Error || std.io.tty.Config.SetColorError;
+pub fn main(comptime options: Options, comptime benchmarks: type) fn () MainError!void {
     return struct {
         fn actualMain() !void {
-            const stderr = std.io.getStdErr();
-            const config = std.io.tty.detectConfig(stderr);
-            const w = stderr.writer();
+            const stderr: std.fs.File = .stderr();
+            const config: std.io.tty.Config = .detect(stderr);
+            var stderr_wbuf: [4096]u8 = undefined;
+            var stderr_w = stderr.writer(&stderr_wbuf);
+            var w = &stderr_w.interface;
 
             if (@import("builtin").mode == .Debug) {
                 try config.setColor(w, .red);
@@ -23,13 +26,15 @@ pub fn main(comptime options: Options, comptime benchmarks: type) fn () std.fs.F
             try w.print("{s:<30} {s:>10}    {s}\n", .{ "BENCHMARK", "ITERATIONS", "TIME" });
             try config.setColor(w, .reset);
 
+            try w.flush();
+
             inline for (comptime std.meta.declarations(benchmarks)) |decl| {
                 try w.print("{s:<30}", .{decl.name});
                 if (runBench(@field(benchmarks, decl.name), options)) |res| {
-                    try w.print(" {:>10}    {}/op ({} total)\n", .{
+                    try w.print(" {:>10}    {D}/op ({D} total)\n", .{
                         res.n,
-                        std.fmt.fmtDuration(res.t / res.n),
-                        std.fmt.fmtDuration(res.t),
+                        res.t / res.n,
+                        res.t,
                     });
                 } else |err| {
                     if (err == error.BenchmarkCanceled) {
@@ -45,6 +50,7 @@ pub fn main(comptime options: Options, comptime benchmarks: type) fn () std.fs.F
                         }
                     }
                 }
+                try w.flush();
             }
         }
     }.actualMain;

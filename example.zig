@@ -1,5 +1,6 @@
 const std = @import("std");
 const benchmark = @import("benchmark");
+
 pub const main = benchmark.main(.{}, struct {
     // Benchmarks are just public functions
     pub fn arrayListWriter(b: *benchmark.B) !void {
@@ -10,11 +11,11 @@ pub const main = benchmark.main(.{}, struct {
         while (b.step()) { // Number of iterations is automatically adjusted for accurate timing
             defer _ = arena.reset(.retain_capacity);
 
-            var a = std.ArrayList(u8).init(arena.allocator());
-            try a.writer().print("Hello, {s}!", .{"world"});
+            var a: std.Io.Writer.Allocating = .init(arena.allocator());
+            try a.writer.print("Hello, {s}!", .{"world"});
 
             // `use` is a helper that calls `std.mem.doNotOptimizeAway`
-            b.use(a.items);
+            b.use(a.written());
         }
     }
 

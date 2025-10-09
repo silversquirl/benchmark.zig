@@ -1,6 +1,7 @@
 .{
-    .name = "benchmark",
+    .name = .benchmark,
     .version = "0.1.0",
-    .min_zig_version = "0.12.0",
+    .fingerprint = 0xb70c48fec4e91ce4,
+    .min_zig_version = "0.15.1",
     .paths = .{""},
 }

@@ -1,4 +1,3 @@
-const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -22,8 +21,14 @@ pub fn build(b: *std.Build) !void {
         }),
     });
 
+    // FIXME: this has a pretty significant effect on the timings on my machine.
+    //        unsure whether it's just memory layout noise or if it's something deeper
+    example_exe.root_module.strip = true;
+
     const example_run_step = b.step("run", "run the example");
 
     const example_run = b.addRunArtifact(example_exe);
     example_run_step.dependOn(&example_run.step);
 }
+
+const std = @import("std");

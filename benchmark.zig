@@ -1,107 +1,142 @@
-const std = @import("std");
-
 pub const Options = struct {
     target: u64 = std.time.ns_per_s, // Target time, in nanoseconds
     limit: u64 = std.time.ns_per_s, // Maximum number of benchmark executions
 };
 
-const MainError = std.Io.Writer.Error || std.io.tty.Config.SetColorError;
-pub fn main(comptime options: Options, comptime benchmarks: type) fn () MainError!void {
+var tty: std.io.tty.Config = .no_color;
+
+pub const Error = error{ WriteFailed, TimerUnsupported, Unexpected };
+pub fn main(comptime options: Options, comptime benchmarks: type) fn () Error!void {
     return struct {
         fn actualMain() !void {
-            const stderr: std.fs.File = .stderr();
-            const config: std.io.tty.Config = .detect(stderr);
-            var stderr_wbuf: [4096]u8 = undefined;
-            var stderr_w = stderr.writer(&stderr_wbuf);
-            var w = &stderr_w.interface;
+            tty = .detect(.stderr());
 
             if (@import("builtin").mode == .Debug) {
-                try config.setColor(w, .red);
-                try config.setColor(w, .bold);
-                try w.print("WARNING: Running benchmarks in debug mode!\n", .{});
-                try config.setColor(w, .reset);
+                std.log.warn("Running benchmarks in debug mode!", .{});
             }
 
-            try config.setColor(w, .bold);
-            try w.print("{s:<30} {s:>10}    {s}\n", .{ "BENCHMARK", "ITERATIONS", "TIME" });
-            try config.setColor(w, .reset);
+            {
+                var buf: [64]u8 = undefined;
+                const w = std.debug.lockStderrWriter(&buf);
+                defer std.debug.unlockStderrWriter();
+                try tty.setColor(w, .bold);
+                try w.print("{s:<30} {s:>10}    {s}\n", .{ "BENCHMARK", "ITERATIONS", "TIME" });
+                try tty.setColor(w, .reset);
+            }
 
-            try w.flush();
+            var b: B = .{
+                .timer = try .start(),
+                .options = options,
+            };
 
             inline for (comptime std.meta.declarations(benchmarks)) |decl| {
-                try w.print("{s:<30}", .{decl.name});
-                if (runBench(@field(benchmarks, decl.name), options)) |res| {
-                    try w.print(" {:>10}    {D}/op ({D} total)\n", .{
-                        res.n,
-                        res.t / res.n,
-                        res.t,
-                    });
-                } else |err| {
-                    if (err == error.BenchmarkCanceled) {
-                        try config.setColor(w, .cyan);
-                        try w.writeAll(" CANCELED\n");
-                        try config.setColor(w, .reset);
-                    } else {
-                        try config.setColor(w, .red);
-                        try w.print(" FAILED: {s}\n", .{@errorName(err)});
-                        try config.setColor(w, .reset);
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-                    }
-                }
-                try w.flush();
+                const result = b.run(@field(benchmarks, decl.name));
+                try printResult(decl.name, result);
             }
         }
     }.actualMain;
 }
 
-fn runBench(comptime benchFn: anytype, comptime options: Options) anyerror!BenchResult {
-    var b = B{
-        .timer = try std.time.Timer.start(),
-        .options = options,
-    };
-    try @call(.never_inline, benchFn, .{&b});
-    return b.result;
+fn printResult(name: []const u8, result: anyerror!B.Result) !void {
+    var buf: [64]u8 = undefined;
+    const w = std.debug.lockStderrWriter(&buf);
+    defer std.debug.unlockStderrWriter();
+
+    if (result) |res| {
+        try w.print("{s:<30} {:>10}    {D}/it ({D} total)\n", .{
+            name,
+            res.total_count,
+            res.total_ns / res.total_count,
+            res.total_ns,
+        });
+    } else |err| {
+        if (err == error.BenchmarkCanceled) {
+            std.log.info("Benchmark '{s}' canceled", .{name});
+        } else {
+            std.log.err("Benchmark '{s}' failed: {s}", .{ name, @errorName(err) });
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+        }
+    }
 }
 
-const BenchResult = struct {
-    t: u64 = 0,
-    n: u64 = 0,
-};
+pub const std_options: std.Options = .{ .logFn = logFn };
+fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    var buf: [256]u8 = undefined;
+    const w = std.debug.lockStderrWriter(&buf);
+    defer std.debug.unlockStderrWriter();
+
+    tty.setColor(w, switch (level) {
+        .err => .red,
+        .warn => .yellow,
+        .info => .cyan,
+        .debug => .gray,
+    }) catch return;
+    tty.setColor(w, .bold) catch return;
+
+    const scope_text = if (scope == .default) "" else "(" ++ @tagName(scope) ++ ")";
+    w.writeAll(comptime level.asText() ++ scope_text ++ ":") catch return;
+
+    tty.setColor(w, .reset) catch return;
+
+    w.print(" " ++ format ++ "\n", args) catch return;
+}
 
 pub const B = struct {
-    timer: std.time.Timer,
+    timer: Timer,
     options: Options,
-    next_target: u64 = 0,
-    result: BenchResult = .{},
+    next_target: u64 = undefined,
+    result: Result = undefined,
 
-    pub inline fn step(b: *B) bool {
-        switch (b.result.n) {
+    const Result = struct {
+        total_ns: u64,
+        total_count: u64,
+    };
+
+    fn reset(b: *B) void {
+        b.timer.reset();
+        b.next_target = 0;
+        b.result = .{ .total_ns = 0, .total_count = 0 };
+    }
+    noinline fn run(b: *B, comptime benchFn: anytype) anyerror!B.Result {
+        b.reset();
+        fence.begin();
+        try benchFn(b);
+        fence.end();
+        return b.result;
+    }
+
+    pub fn step(b: *B) bool {
+        switch (b.result.total_count) {
             0 => {
-                b.result.n = 1;
+                b.result.total_count = 1;
                 b.timer.reset();
                 return true;
             },
 
             1 => {},
 
-            else => if (b.result.n < b.next_target) {
-                b.result.n += 1;
+            else => if (b.result.total_count < b.next_target) {
+                b.result.total_count += 1;
                 return true;
             },
         }
 
-        b.result.t += b.timer.lap();
-        b.result.t -|= b.timer.read(); // Roughly correct for timer read
+        b.result.total_ns += b.timer.lap();
 
-        if (b.result.n >= b.options.limit or b.result.t >= b.options.target) {
+        if (b.result.total_count >= b.options.limit or b.result.total_ns >= b.options.target) {
             return false;
         }
 
         // Try to predict the future
-        const avg = b.result.t / b.result.n;
-        const rem = b.options.target - b.result.t;
+        const avg = b.result.total_ns / b.result.total_count;
+        const rem = b.options.target - b.result.total_ns;
         var off = rem / (avg + 1);
         if (b.next_target + off > b.options.limit) {
             off = b.options.limit - b.next_target;
@@ -109,15 +144,157 @@ pub const B = struct {
         off /= 8;
         b.next_target += off;
 
-        b.result.n += 1;
+        b.result.total_count += 1;
         b.timer.reset();
         return true;
     }
 
-    pub inline fn cancel(_: B) error{BenchmarkCanceled} {
+    pub fn cancel(_: B) error{BenchmarkCanceled} {
         return error.BenchmarkCanceled;
     }
-    pub inline fn use(_: B, x: anytype) void {
+    pub fn use(_: B, x: anytype) void {
         std.mem.doNotOptimizeAway(&x);
     }
 };
+
+const Timer: type =
+    if (@hasDecl(@import("root"), "benchmark_timer"))
+        @import("root").benchmark_timer
+    else switch (@import("builtin").cpu.arch) {
+        .x86, .x86_64 => RdtscTimer,
+        else => std.time.Timer,
+    };
+
+const RdtscTimer = struct {
+    start_tsc: u64,
+    numerator: u32 = 0,
+    denominator: u32 = 0,
+
+    /// This function performs calibration and is therefore very expensive. Try to reuse the timer if at all posible.
+    pub fn start() std.time.Timer.Error!RdtscTimer {
+        // Standard help message for initialization errors
+        const help =
+            \\
+            \\This should not happen on CPUs made in the past decade - please report a bug.
+            \\If you are on a very old CPU, try adding `pub const benchmark_timer = std.time.Timer` to your root source file.
+        ;
+
+        if (cpuid(1)[3] & (1 << 4) == 0) {
+            std.log.err("Your CPU does not have timestamp counter support." ++ help, .{});
+            return error.TimerUnsupported;
+        }
+
+        if (cpuid(0x80000001)[3] & (1 << 27) == 0) {
+            std.log.err("Your CPU does not support RDTSCP." ++ help, .{});
+            return error.TimerUnsupported;
+        }
+        if (cpuid(0x80000007)[3] & (1 << 8) == 0) {
+            std.log.err("Your CPU's timestamp counter is not invariant." ++ help, .{});
+            return error.TimerUnsupported;
+        }
+
+        // TODO: this doesn't work on AMD. If there's a way to do something similar on AMD, this would be preferable over the calibration method.
+        // const tsc_denom, const tsc_num, const xtal_freq, _ = cpuid(0x15);
+        // if (tsc_denom == 0 or tsc_num == 0 or xtal_freq == 0) {
+        //     std.log.err("Unable to determine TSC speed." ++ help, .{});
+        //     std.log.warn("tsc/core clock = {}/{}; core clock = {} Hz", .{ tsc_num, tsc_denom, xtal_freq });
+        //     std.log.warn("{any}", .{cpuid(0x15)});
+        //     return error.TimerUnsupported;
+        // }
+        // tsc_info = .{
+        //     .numerator = tsc_denom,
+        //     .denominator = tsc_num * xtal_freq,
+        // };
+
+        // Calibrate TSC frequency
+        var cal_timer: std.time.Timer = try .start();
+        const cal_start, _ = rdtscp();
+        std.Thread.sleep(100 * std.time.ns_per_ms);
+        const cal_ns = cal_timer.read();
+        const cal_end, _ = rdtscp();
+
+        if (cal_end <= cal_start) {
+            @panic("rdtsc returned non-monotonic result!");
+        }
+        const numerator = std.math.cast(u32, cal_ns) orelse {
+            // TODO: It's possible to gracefully handle this case, by scaling down both the numerator and denominator.
+            //       However, this overflow can only happen if the system slept for over 2 seconds when asked for a 100ms sleep,
+            //       in which case it's not in a fit state to be benchmarking anything anyway.
+            std.debug.panic("calibration time delta {} does not fit into u32!", .{cal_ns});
+        };
+        const denominator = std.math.cast(u32, cal_end - cal_start) orelse {
+            std.debug.panic("calibration tick delta {} does not fit into u32!", .{cal_end - cal_start});
+        };
+
+        // TODO: utilize processor ID
+        const tsc, _ = rdtscp();
+        return .{
+            .start_tsc = tsc,
+            .numerator = numerator,
+            .denominator = denominator,
+        };
+    }
+
+    pub fn read(timer: RdtscTimer) u64 {
+        const tsc, _ = rdtscp();
+        return timer.ns(tsc);
+    }
+    pub fn reset(timer: *RdtscTimer) void {
+        timer.start_tsc, _ = rdtscp();
+    }
+    pub fn lap(timer: *RdtscTimer) u64 {
+        const tsc, _ = rdtscp();
+        defer timer.start_tsc = tsc;
+        return timer.ns(tsc);
+    }
+
+    fn ns(timer: RdtscTimer, current_tsc: u64) u64 {
+        const ticks = current_tsc - timer.start_tsc;
+        return ticks * timer.numerator / timer.denominator;
+    }
+
+    fn rdtscp() struct { u64, u32 } {
+        var d: u32 = undefined;
+        var a: u32 = undefined;
+        const proc_id = asm volatile ("rdtscp"
+            : [a] "={eax}" (a),
+              [d] "={edx}" (d),
+              [c] "={ecx}" (-> u32),
+        );
+        return .{ @as(u64, d) << 32 | a, proc_id };
+    }
+
+    fn cpuid(eax: u32) [4]u32 {
+        var a: u32 = undefined;
+        var b: u32 = undefined;
+        var c: u32 = undefined;
+        var d: u32 = undefined;
+
+        asm volatile ("cpuid"
+            : [a] "={eax}" (a),
+              [b] "={ebx}" (b),
+              [c] "={ecx}" (c),
+              [d] "={edx}" (d),
+            : [a_in] "{eax}" (eax),
+        );
+
+        return .{ a, b, c, d };
+    }
+};
+
+const fence = struct {
+    fn begin() void {
+        switch (@import("builtin").cpu.arch) {
+            .x86, .x86_64 => asm volatile ("lfence"),
+            else => {},
+        }
+    }
+    fn end() void {
+        switch (@import("builtin").cpu.arch) {
+            .x86, .x86_64 => asm volatile ("mfence; lfence"),
+            else => {},
+        }
+    }
+};
+
+const std = @import("std");

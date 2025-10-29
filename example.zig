@@ -3,7 +3,7 @@ const benchmark = @import("benchmark");
 
 pub const main = benchmark.main(.{}, struct {
     // Benchmarks are just public functions
-    pub fn arrayListWriter(b: *benchmark.B) !void {
+    pub fn allocatingWriter(b: *benchmark.B) !void {
         // Setup is not timed
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();

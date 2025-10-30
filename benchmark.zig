@@ -43,12 +43,16 @@ fn printResult(name: []const u8, result: anyerror!B.Result) !void {
     defer std.debug.unlockStderrWriter();
 
     if (result) |res| {
-        try w.print("{s:<30} {:>10}    {D}/it (σ={D})\n", .{
+        try w.print("{s:<30} {:>10}    {D}/it", .{
             name,
             res.total_count,
             res.total_ns / res.total_count,
-            std.math.sqrt(res.total_sq_dev / res.total_count),
         });
+        if (res.total_count > 1) {
+            const stddev = std.math.sqrt(res.total_sq_dev / res.total_count);
+            try w.print(" (σ={D})", .{stddev});
+        }
+        try w.writeByte('\n');
     } else |err| {
         if (err == error.BenchmarkCanceled) {
             std.log.info("Benchmark '{s}' canceled", .{name});

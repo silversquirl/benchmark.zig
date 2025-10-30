@@ -43,11 +43,11 @@ fn printResult(name: []const u8, result: anyerror!B.Result) !void {
     defer std.debug.unlockStderrWriter();
 
     if (result) |res| {
-        try w.print("{s:<30} {:>10}    {D}/it ({D} total)\n", .{
+        try w.print("{s:<30} {:>10}    {D}/it (σ={D})\n", .{
             name,
             res.total_count,
             res.total_ns / res.total_count,
-            res.total_ns,
+            std.math.sqrt(res.total_sq_dev / res.total_count),
         });
     } else |err| {
         if (err == error.BenchmarkCanceled) {
@@ -96,13 +96,18 @@ pub const B = struct {
 
     const Result = struct {
         total_ns: u64,
+        total_sq_dev: u64,
         total_count: u64,
     };
 
     fn reset(b: *B) void {
-        b.timer.reset();
         b.next_target = 0;
-        b.result = .{ .total_ns = 0, .total_count = 0 };
+        b.result = .{
+            .total_ns = 0,
+            .total_sq_dev = 0,
+            .total_count = 0,
+        };
+        // timer is reset upon first call to `step`, so no need to reset it here
     }
     noinline fn run(b: *B, comptime benchFn: anytype) anyerror!B.Result {
         b.reset();
@@ -113,36 +118,30 @@ pub const B = struct {
     }
 
     pub fn step(b: *B) bool {
-        switch (b.result.total_count) {
-            0 => {
-                b.result.total_count = 1;
-                b.timer.reset();
-                return true;
-            },
-
-            1 => {},
-
-            else => if (b.result.total_count < b.next_target) {
-                b.result.total_count += 1;
-                return true;
-            },
+        if (b.result.total_count == 0) {
+            b.result.total_count = 1;
+            b.timer.reset();
+            return true;
         }
 
-        b.result.total_ns += b.timer.lap();
+        const time = b.timer.read();
+
+        // Welford online algorithm
+        {
+            const mean1 = if (b.result.total_count == 1)
+                0
+            else
+                b.result.total_ns / (b.result.total_count - 1);
+            b.result.total_ns += time;
+            const mean2 = b.result.total_ns / b.result.total_count;
+
+            const signed: i65 = time;
+            b.result.total_sq_dev += @intCast((signed - mean1) * (signed - mean2));
+        }
 
         if (b.result.total_count >= b.options.limit or b.result.total_ns >= b.options.target) {
             return false;
         }
-
-        // Try to predict the future
-        const avg = b.result.total_ns / b.result.total_count;
-        const rem = b.options.target - b.result.total_ns;
-        var off = rem / (avg + 1);
-        if (b.next_target + off > b.options.limit) {
-            off = b.options.limit - b.next_target;
-        }
-        off /= 8;
-        b.next_target += off;
 
         b.result.total_count += 1;
         b.timer.reset();
